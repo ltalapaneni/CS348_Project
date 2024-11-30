@@ -110,23 +110,44 @@ def delete_meeting(id):
         db.session.rollback()
         return jsonify({"error": "Failed to delete meeting", "details": str(e)}), 400
 
+@app.route('/meetings', methods=['GET'])
+def get_meetings():
+    meetings = Meeting.query.all()
+    return jsonify([meeting.to_dict() for meeting in meetings])
+
 @app.route('/meetings/report', methods=['GET'])
 def generate_report():
-    date = request.args.get('date')
+    date = request.args.get('date')  # Date filter
+    meeting_type = request.args.get('meeting_type')  # Meeting type filter
+
     try:
         # Use Serializable isolation level for critical data consistency
         with db.engine.connect().execution_options(isolation_level="SERIALIZABLE") as connection:
-            query = text("""
+            # Build the WHERE clause dynamically
+            conditions = []
+            params = {}
+
+            if date:
+                conditions.append("date = :date")
+                params["date"] = date
+
+            if meeting_type:
+                conditions.append("meeting_type = :meeting_type")
+                params["meeting_type"] = meeting_type
+
+            where_clause = " AND ".join(conditions) if conditions else "1=1"
+
+            query = text(f"""
                 SELECT topic, 
                        AVG(duration) AS average_duration, 
                        AVG(invited_students) AS average_invited_students, 
                        AVG(accepted_invitations) AS average_accepted_invitations,
                        COALESCE(SUM(accepted_invitations) / NULLIF(SUM(invited_students), 0), 0) AS average_attendance_rate
                 FROM meetings
-                WHERE date = :date
+                WHERE {where_clause}
                 GROUP BY topic
             """)
-            result = connection.execute(query, {"date": date}).fetchall()
+            result = connection.execute(query, params).fetchall()
 
         report = [
             {
